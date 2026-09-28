@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --brand: #ffd100;
+  --ink: #0a0a0c;
+  --panel: #131318;
+  --edge: #24242c;
+  --text: #e4e4e7;
+  --text-soft: color-mix(in oklab, var(--text) 88%, var(--ink));
+  --text-muted: color-mix(in oklab, var(--text) 70%, var(--ink));
+  --text-faint: color-mix(in oklab, var(--text) 45%, var(--ink));
+  --text-faint2: color-mix(in oklab, var(--text) 32%, var(--ink));
+  --ui-font-sans: var(--font-geist-sans);
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-edge: var(--edge);
+  --color-zinc-100: var(--text);
+  --color-zinc-200: var(--text);
+  --color-zinc-300: var(--text-soft);
+  --color-zinc-400: var(--text-muted);
+  --color-zinc-500: var(--text-faint);
+  --color-zinc-600: var(--text-faint2);
+  --font-sans: var(--ui-font-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+}
+
+::selection {
+  background: var(--brand);
+  color: var(--ink);
+}
