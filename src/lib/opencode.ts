@@ -155,6 +155,74 @@ export async function abortSession(
   );
 }
 
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionInfo {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface PendingQuestion {
+  id: string;
+  sessionID: string;
+  questions: QuestionInfo[];
+}
+
+export async function listPendingQuestions(
+  directory: string,
+  sessionID?: string,
+): Promise<PendingQuestion[]> {
+  const res = await ocFetch("/question", { directory });
+  if (!res.ok) return [];
+  const data: unknown = await res.json();
+  const entries = Array.isArray(data) ? data : [];
+  return entries
+    .map((raw) => {
+      const q = raw as Record<string, unknown>;
+      const questions = Array.isArray(q.questions)
+        ? (q.questions as QuestionInfo[])
+        : [];
+      return {
+        id: text(q.id),
+        sessionID: text(q.sessionID),
+        questions,
+      };
+    })
+    .filter((q) => q.id && q.questions.length > 0)
+    .filter((q) => !sessionID || q.sessionID === sessionID);
+}
+
+export async function replyQuestion(
+  requestID: string,
+  directory: string,
+  answers: string[][],
+): Promise<void> {
+  const res = await ocFetch(
+    `/question/${requestID}/reply`,
+    { directory },
+    { method: "POST", body: JSON.stringify({ answers }) },
+  );
+  if (!res.ok) throw new Error("failed to answer question");
+}
+
+export async function rejectQuestion(
+  requestID: string,
+  directory: string,
+): Promise<void> {
+  const res = await ocFetch(
+    `/question/${requestID}/reject`,
+    { directory },
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error("failed to skip question");
+}
+
 export function toolLabel(tool: string, input: Record<string, unknown>): string {
   const candidates = [
     "command",

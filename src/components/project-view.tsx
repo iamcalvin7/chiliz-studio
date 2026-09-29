@@ -13,7 +13,7 @@ import { Chat } from "@/components/chat";
 import { Preview } from "@/components/preview";
 import { Terminal } from "@/components/terminal";
 import { PublishDialog } from "@/components/publish-dialog";
-import type { OcSession, UiMessage } from "@/lib/opencode";
+import type { OcSession, PendingQuestion, UiMessage } from "@/lib/opencode";
 
 interface ProjectViewProps {
   directory: string;
@@ -25,6 +25,7 @@ interface ProjectViewProps {
   activeId: string | null;
   initialMessages: UiMessage[];
   initialBusy: boolean;
+  initialQuestion: PendingQuestion | null;
   serverUp: boolean;
 }
 
@@ -40,6 +41,7 @@ export function ProjectView({
   activeId,
   initialMessages,
   initialBusy,
+  initialQuestion,
   serverUp,
 }: ProjectViewProps) {
   const [tab, setTab] = useState<Tab>("chat");
@@ -115,6 +117,7 @@ export function ProjectView({
           activeId={activeId}
           initialMessages={initialMessages}
           initialBusy={initialBusy}
+          initialQuestion={initialQuestion}
           serverUp={serverUp}
           canEdit={canEdit}
         />

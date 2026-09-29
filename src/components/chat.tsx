@@ -5,6 +5,7 @@ import {
   ArrowDown,
   Brain,
   CheckCircle2,
+  CircleHelp,
   Flame,
   Loader2,
   Pencil,
@@ -14,7 +15,7 @@ import {
   Square,
 } from "lucide-react";
 import { convertRawPart } from "@/lib/opencode";
-import type { OcSession, UiMessage } from "@/lib/opencode";
+import type { OcSession, PendingQuestion, UiMessage } from "@/lib/opencode";
 import { TimeAgo } from "@/components/time-ago";
 import { Markdown } from "@/components/markdown";
 
@@ -88,6 +89,7 @@ interface ChatProps {
   activeId: string | null;
   initialMessages: UiMessage[];
   initialBusy: boolean;
+  initialQuestion: PendingQuestion | null;
   serverUp: boolean;
   canEdit: boolean;
 }
@@ -98,6 +100,7 @@ export function Chat({
   activeId: initialActiveId,
   initialMessages,
   initialBusy,
+  initialQuestion,
   serverUp,
   canEdit,
 }: ChatProps) {
@@ -105,6 +108,13 @@ export function Chat({
   const [activeId, setActiveId] = useState<string | null>(initialActiveId);
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
   const [busy, setBusy] = useState(initialBusy);
+  const [question, setQuestion] = useState<PendingQuestion | null>(
+    initialQuestion,
+  );
+  const [selections, setSelections] = useState<string[][]>([]);
+  const [custom, setCustom] = useState<string[]>([]);
+  const [answering, setAnswering] = useState(false);
+  const lastQuestionIdRef = useRef<string | null>(initialQuestion?.id ?? null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
@@ -122,13 +132,28 @@ export function Chat({
       const data = (await res.json()) as {
         messages: UiMessage[];
         busy: boolean;
+        question?: PendingQuestion | null;
       };
       setMessages(data.messages);
       setBusy(data.busy);
+      const next = data.question ?? null;
+      setQuestion(next);
+      if ((next?.id ?? null) !== lastQuestionIdRef.current) {
+        lastQuestionIdRef.current = next?.id ?? null;
+        setSelections(next ? next.questions.map(() => []) : []);
+        setCustom(next ? next.questions.map(() => "") : []);
+      }
     } catch {
       return;
     }
   }, [activeId, directory]);
+
+  function resetAnswerState(next: PendingQuestion | null) {
+    lastQuestionIdRef.current = next?.id ?? null;
+    setQuestion(next);
+    setSelections(next ? next.questions.map(() => []) : []);
+    setCustom(next ? next.questions.map(() => "") : []);
+  }
 
   useEffect(() => {
     if (!activeId) return;
@@ -150,12 +175,34 @@ export function Chat({
       top: el.scrollHeight,
       behavior: busy ? "auto" : "smooth",
     });
-  }, [messages, busy, atBottom]);
+  }, [messages, busy, atBottom, question]);
 
   const handleStreamEvent = useCallback(
     (event: StreamEvent) => {
       const props = event.properties ?? {};
       switch (event.type) {
+        case "question.asked": {
+          const requestID = typeof props.id === "string" ? props.id : "";
+          const questions = Array.isArray(props.questions)
+            ? (props.questions as PendingQuestion["questions"])
+            : [];
+          if (!requestID || questions.length === 0) return;
+          if (props.sessionID && props.sessionID !== activeId) return;
+          resetAnswerState({ id: requestID, sessionID: activeId ?? "", questions });
+          break;
+        }
+        case "question.replied":
+        case "question.rejected": {
+          const requestID =
+            typeof props.requestID === "string" ? props.requestID : "";
+          if (
+            requestID &&
+            lastQuestionIdRef.current === requestID
+          ) {
+            resetAnswerState(null);
+          }
+          break;
+        }
         case "message.updated": {
           const info = props.info as Record<string, unknown> | undefined;
           if (!info || typeof info.id !== "string") return;
@@ -226,7 +273,7 @@ export function Chat({
         }
       }
     },
-    [refresh],
+    [refresh, activeId],
   );
 
   useEffect(() => {
@@ -288,6 +335,7 @@ export function Chat({
       setActiveId(data.session.id);
       setMessages([]);
       setBusy(false);
+      resetAnswerState(null);
     } catch {
       return;
     }
@@ -339,6 +387,76 @@ export function Chat({
     await refresh();
   }
 
+  function pick(index: number, multiple: boolean, label: string) {
+    setSelections((prev) => {
+      const next = [...prev];
+      const current = next[index] ?? [];
+      next[index] = multiple
+        ? current.includes(label)
+          ? current.filter((value) => value !== label)
+          : [...current, label]
+        : current.includes(label)
+          ? []
+          : [label];
+      return next;
+    });
+  }
+
+  function canSubmit(): boolean {
+    if (!question) return false;
+    return question.questions.every(
+      (info, index) =>
+        (selections[index]?.length ?? 0) > 0 ||
+        (custom[index] ?? "").trim().length > 0,
+    );
+  }
+
+  async function answerQuestion() {
+    if (!question || !activeId || answering || !canSubmit()) return;
+    const answers = question.questions.map(
+      (info, index) =>
+        [
+          ...(selections[index] ?? []),
+          ...((custom[index] ?? "").trim()
+            ? [(custom[index] ?? "").trim()]
+            : []),
+        ] as string[],
+    );
+    setAnswering(true);
+    try {
+      const res = await fetch(`/api/sessions/${activeId}/question`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ directory, requestID: question.id, answers }),
+      });
+      if (!res.ok) return;
+      resetAnswerState(null);
+      await refresh();
+    } catch {
+      return;
+    } finally {
+      setAnswering(false);
+    }
+  }
+
+  async function skipQuestion() {
+    if (!question || !activeId || answering) return;
+    setAnswering(true);
+    try {
+      const res = await fetch(
+        `/api/sessions/${activeId}/question?directory=${encodeURIComponent(directory)}&requestID=${encodeURIComponent(question.id)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) return;
+      resetAnswerState(null);
+      await refresh();
+    } catch {
+      return;
+    } finally {
+      setAnswering(false);
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="hidden w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-edge bg-panel/40 p-3 md:flex">
@@ -384,6 +502,7 @@ export function Chat({
                     setActiveId(session.id);
                     setMessages([]);
                     setBusy(false);
+                    resetAnswerState(null);
                   }}
                   className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 pr-7 text-left transition-colors ${
                     session.id === activeId
@@ -525,7 +644,8 @@ export function Chat({
                         (part) =>
                           part.kind === "text" || part.kind === "tool",
                       ) &&
-                        busy && (
+                        busy &&
+                        !question && (
                           <div className="flex items-center gap-1 py-1">
                             {[0, 1, 2].map((dot) => (
                               <span
@@ -542,6 +662,100 @@ export function Chat({
                   </div>
                 );
               })}
+
+              {question && (
+                <div className="flex gap-3">
+                  <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border border-edge bg-panel">
+                    <CircleHelp className="size-4 text-brand" />
+                  </span>
+                  <div className="flex min-w-0 max-w-[92%] flex-col gap-3 rounded-2xl border border-brand/40 bg-panel/60 px-4 py-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-brand">
+                      The agent needs your input
+                    </p>
+                    {question.questions.map((info, index) => (
+                      <div key={index} className="flex flex-col gap-2">
+                        <p className="whitespace-pre-wrap text-sm text-white">
+                          {info.header && (
+                            <span className="font-semibold text-zinc-400">
+                              {info.header}:{" "}
+                            </span>
+                          )}
+                          {info.question}
+                        </p>
+                        {info.options.length > 0 && (
+                          <div className="flex flex-col gap-1.5">
+                            {info.options.map((option) => {
+                              const picked = (selections[index] ?? []).includes(
+                                option.label,
+                              );
+                              return (
+                                <button
+                                  key={option.label}
+                                  type="button"
+                                  onClick={() =>
+                                    pick(index, info.multiple === true, option.label)
+                                  }
+                                  className={`flex flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition-colors ${
+                                    picked
+                                      ? "border-brand bg-brand/15 text-white"
+                                      : "border-edge bg-ink text-zinc-300 hover:border-brand/40 hover:text-white"
+                                  }`}
+                                >
+                                  <span className="text-sm font-medium">
+                                    {option.label}
+                                  </span>
+                                  {option.description && (
+                                    <span className="text-xs text-zinc-500">
+                                      {option.description}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {info.custom && (
+                          <input
+                            value={custom[index] ?? ""}
+                            onChange={(event) =>
+                              setCustom((prev) => {
+                                const next = [...prev];
+                                next[index] = event.target.value;
+                                return next;
+                              })
+                            }
+                            placeholder="Or type your own answer..."
+                            className="h-9 rounded-lg border border-edge bg-ink px-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-brand/60"
+                          />
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => void answerQuestion()}
+                        disabled={!canSubmit() || answering}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-1.5 text-xs font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
+                      >
+                        {answering ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="size-3.5" />
+                        )}
+                        Answer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void skipQuestion()}
+                        disabled={answering}
+                        className="inline-flex items-center rounded-lg border border-edge px-3.5 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:bg-edge/60 hover:text-white disabled:opacity-40"
+                      >
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

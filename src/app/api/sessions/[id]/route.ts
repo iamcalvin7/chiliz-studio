@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   abortSession,
   listMessages,
+  listPendingQuestions,
   renameSession,
   sendPrompt,
 } from "@/lib/opencode";
@@ -31,7 +32,8 @@ export async function GET(request: Request, context: Context) {
   }
   try {
     const { messages, busy } = await listMessages(id, directory);
-    return NextResponse.json({ messages, busy });
+    const question = (await listPendingQuestions(directory, id))[0] ?? null;
+    return NextResponse.json({ messages, busy, question });
   } catch {
     return NextResponse.json(
       { error: "opencode server unreachable" },

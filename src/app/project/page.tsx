@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 import { getSessionUser, getOwnerNames } from "@/lib/auth";
 import { readBranding } from "@/lib/branding.server";
-import { isServerUp, listMessages, listSessions } from "@/lib/opencode";
+import { isServerUp, listMessages, listPendingQuestions, listSessions } from "@/lib/opencode";
+import type { PendingQuestion } from "@/lib/opencode";
 import { getProjectByPath } from "@/lib/projects";
 import { ProjectView } from "@/components/project-view";
 
@@ -54,6 +55,7 @@ export default async function ProjectPage({
   let activeId: string | null = null;
   let messages: Awaited<ReturnType<typeof listMessages>>["messages"] = [];
   let busy = false;
+  let question: PendingQuestion | null = null;
 
   if (up) {
     try {
@@ -64,6 +66,7 @@ export default async function ProjectPage({
         const result = await listMessages(latest.id, p);
         messages = result.messages;
         busy = result.busy;
+        question = (await listPendingQuestions(p, latest.id))[0] ?? null;
       }
     } catch {
       sessions = [];
@@ -81,6 +84,7 @@ export default async function ProjectPage({
       activeId={activeId}
       initialMessages={messages}
       initialBusy={busy}
+      initialQuestion={question}
       serverUp={up}
     />
   );
